@@ -17411,6 +17411,7 @@ const PANEL_USE_PERIODS = [["today", "Today"], ["7d", "7 days"], ["30d", "30 day
 let panelUsePeriod = "today", panelUseProvider = "", panelUseMetric = "tokens", panelUseComputer = "", panelUseDay = "", panelUseSplit = "provider";
 try {
   const p = localStorage.getItem("magpie.panelUsePeriod"), m = localStorage.getItem("magpie.panelUseMetric");
+  panelUseProvider = localStorage.getItem("magpie.panelUseProvider") || "";
   if (PANEL_USE_PERIODS.some(([id]) => id === p)) panelUsePeriod = p;
   if (["tokens", "cost", "calls"].includes(m)) panelUseMetric = m;
   if (localStorage.getItem("magpie.panelUseSplit") == "model") panelUseSplit = "model";
@@ -17477,6 +17478,16 @@ if (mode === "panel") {
   document.addEventListener("visibilitychange", again);
 }
 
+function pickPanelUseProvider(id) {
+  panelUseProvider = id;
+  try {
+    if (id) localStorage.setItem("magpie.panelUseProvider", id);
+    else localStorage.removeItem("magpie.panelUseProvider");
+  } catch {}
+  renderPanelUse();
+  loadPanelUse().catch(() => {});
+}
+
 function renderPanelUse() {
   const box = $("#panelUsage");
   if (mode !== "panel" || !box) return;
@@ -17501,8 +17512,12 @@ function renderPanelUse() {
   const pick = el("button", "sess-pick");
   pick.type = "button";
   const opts = (l?.providers || []).map((p) => ({ v: p.id, name: t(p.name), note: "" }));
-  if (panelUseProvider && l && !opts.some((o) => o.v === panelUseProvider)) panelUseProvider = "";
-  sessPick(pick, "All providers", panelUseProvider, opts, "Provider", (id) => { panelUseProvider = id; renderPanelUse(); loadPanelUse().catch(() => {}); });
+  // The period's provider list can omit the saved pick on a quiet day.
+  if (panelUseProvider && !opts.some((o) => o.v === panelUseProvider)) {
+    opts.push({ v: panelUseProvider, name: panelUseProvider === "session-unknown" ? t("Local session") : panelUseProvider, note: "" });
+  }
+  sessPick(pick, "All providers", panelUseProvider, opts, "Provider", pickPanelUseProvider);
+  pick.hidden = !opts.length; // even a sole provider can be picked for future periods
   // the computers whose usage sync shares (#542): none, and it isn't there
   const comp = el("button", "sess-pick");
   comp.type = "button";
@@ -17592,9 +17607,7 @@ function renderPanelUse() {
     rank.chart = chart;
     drawLedRank(rank, l, split, panelUseMetric, "", (x) => {
       if (split !== "provider") return; // a model is not a way in: the picker has the providers
-      panelUseProvider = x.id;
-      renderPanelUse();
-      loadPanelUse().catch(() => {});
+      pickPanelUseProvider(x.id);
     }, true);
     if (v.scrollTop !== keep) v.scrollTop = keep;
     fit();
