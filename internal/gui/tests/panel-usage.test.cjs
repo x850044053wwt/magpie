@@ -112,6 +112,40 @@ const want = {
 };
 
 for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium", "webkit"])) {
+  test(`${engine}: the tray remembers its Usage provider`, async (t) => {
+    const browser = await (engine === "webkit" ? webkit.launch() : chromium.launch({ channel: "chromium" }));
+    t.after(() => browser.close());
+    const p = await browser.newPage({ viewport: { width: 440, height: 560 }, reducedMotion: "reduce" });
+    await p.route("**/*", serve("en", [], []));
+    let hasLocalCalls = true;
+    await p.route("**/api/usage/requests?*", async (route) => {
+      const data = page(new URL(route.request().url()).searchParams);
+      if (hasLocalCalls) data.providers = [{ id: "session-unknown", name: "Local session" }];
+      await route.fulfill({ json: data });
+    });
+    await p.goto("http://magpie.test/?mode=panel");
+    await p.locator('#ptabs [data-ptab="stats"]').click();
+    const picker = p.locator("#panelUsage .pu-bar .sess-pick:visible").first();
+    const choose = async (label) => {
+      await picker.click();
+      await p.getByRole("menuitemradio", { name: label, exact: true }).click();
+    };
+    const reload = async (provider, label) => {
+      await p.locator("#panelUsage:not(.pu-loading)").waitFor();
+      const first = p.waitForRequest((r) => new URL(r.url()).pathname === "/api/usage/requests");
+      await p.reload();
+      assert.equal(new URL((await first).url()).searchParams.get("provider"), provider, "first ledger request after reload");
+      await p.locator("#panelUsage:not(.pu-loading) .pu-bar .sess-pick", { hasText: label }).waitFor();
+    };
+    await choose("Local session");
+    hasLocalCalls = false;
+    await reload("session-unknown", "Local session");
+    await choose("All providers");
+    await reload(null, "All providers");
+    await p.locator("#panelUsage .led-rank .rk").first().click();
+    await reload("anthropic", "Claude");
+  });
+
   for (const lang of ["en", "zh"]) {
     test(`${engine} ${lang}: the tray panel's Usage tab`, async (t) => {
       const browser = await (engine === "webkit" ? webkit.launch() : chromium.launch({ channel: "chromium" }));
